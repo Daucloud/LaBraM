@@ -25,6 +25,17 @@ pip install -r requirements.txt
 
 ---
 
+## [IMPORTANT] Fine-tune on Your Own Dataset
+
+You can adapt LaBraM to your own datasets by following the fine-tuning scripts provided for TUAB and TUEV. Simply replace the dataset-specific parts of the code with your own data. When doing so, make sure to:
+
+1. Load a pre-trained LaBraM checkpoint.
+2. Provide the input channel order list to specify the channel configuration.
+
+**The above two points are significant to obtain normal performance of LaBraM.**
+
+---
+
 ## Running Experiments
 
 ### 1. Prepare Pre-training Data
@@ -127,15 +138,6 @@ OMP_NUM_THREADS=1 torchrun --nnodes=1 --nproc_per_node=8 run_class_finetuning.py
     --disable_qkv_bias \
     --seed 0
 ```
-
----
-
-## Fine-tune on Your Own Dataset
-
-You can adapt LaBraM to your own datasets by following the fine-tuning scripts provided for TUAB and TUEV. Simply replace the dataset-specific parts of the code with your own data. When doing so, make sure to:
-
-1. Load a pre-trained LaBraM checkpoint.
-2. Provide the input channel order list to specify the channel configuration.
 
 ---
 
