@@ -35,7 +35,6 @@ def train_one_epoch(model: torch.nn.Module,
     print_freq = 10
 
     criterion = nn.CrossEntropyLoss()
-    input_chans = utils.get_input_chans(ch_names) if ch_names is not None else None
     grad_accum = getattr(args, "gradient_accumulation_steps", 1) if args is not None else 1
 
     for step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
@@ -50,6 +49,28 @@ def train_one_epoch(model: torch.nn.Module,
         samples = samples.float().to(device, non_blocking=True) / 100
         if samples.ndim == 3:
             samples = samples.unsqueeze(2)  # (B, chan, 1, time)
+
+        # reshape time axis into patches of 200 to match patch embed
+        patch_len = 200
+        time_len = samples.shape[-1]
+        usable_len = (time_len // patch_len) * patch_len
+        if usable_len == 0:
+            raise ValueError(f"time length {time_len} too short for patch length {patch_len}")
+        if usable_len != time_len:
+            samples = samples[..., :usable_len]
+        num_patches = usable_len // patch_len
+
+        bsz, n_chan, n_subband, _ = samples.shape
+        samples = samples.reshape(bsz, n_chan, n_subband, num_patches, patch_len)
+        samples = samples.reshape(bsz, n_chan * n_subband, num_patches, patch_len)
+
+        # expand channel indices for subbands to align pos_embed length
+        if ch_names is not None:
+            base_chans = utils.get_input_chans(ch_names)  # [cls + channels]
+            # duplicate channel indices for each subband
+            input_chans = [base_chans[0]] + [c for c in base_chans[1:] for _ in range(n_subband)]
+        else:
+            input_chans = None
         targets = targets.to(device, non_blocking=True)
 
         sync_needed = args is not None and getattr(args, "distributed", False) and (step + 1) % grad_accum != 0
@@ -113,7 +134,6 @@ def train_one_epoch(model: torch.nn.Module,
 
 @torch.no_grad()
 def evaluate(model: torch.nn.Module, data_loader: Iterable, device: torch.device, header='Test:', ch_names=None):
-    input_chans = utils.get_input_chans(ch_names) if ch_names is not None else None
     criterion = nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -122,6 +142,25 @@ def evaluate(model: torch.nn.Module, data_loader: Iterable, device: torch.device
         samples = samples.float().to(device, non_blocking=True) / 100
         if samples.ndim == 3:
             samples = samples.unsqueeze(2)
+
+        patch_len = 200
+        time_len = samples.shape[-1]
+        usable_len = (time_len // patch_len) * patch_len
+        if usable_len == 0:
+            raise ValueError(f"time length {time_len} too short for patch length {patch_len}")
+        if usable_len != time_len:
+            samples = samples[..., :usable_len]
+        num_patches = usable_len // patch_len
+
+        bsz, n_chan, n_subband, _ = samples.shape
+        samples = samples.reshape(bsz, n_chan, n_subband, num_patches, patch_len)
+        samples = samples.reshape(bsz, n_chan * n_subband, num_patches, patch_len)
+
+        if ch_names is not None:
+            base_chans = utils.get_input_chans(ch_names)
+            input_chans = [base_chans[0]] + [c for c in base_chans[1:] for _ in range(n_subband)]
+        else:
+            input_chans = None
         targets = targets.to(device, non_blocking=True)
 
         with torch.cuda.amp.autocast():
