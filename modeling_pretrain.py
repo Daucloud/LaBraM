@@ -80,7 +80,7 @@ class NeuralTransformerForMaskedEEGModeling(nn.Module):
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_norm=qk_norm, qk_scale=qk_scale,
                 drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
-                init_values=init_values, window_size=self.patch_embed.patch_shape if use_rel_pos_bias else None,
+                init_values=init_values if init_values is not None else 0.0, window_size=self.patch_embed.patch_shape if use_rel_pos_bias else None,
                 attn_head_dim=attn_head_dim,
             )
             for i in range(depth)])
@@ -134,6 +134,10 @@ class NeuralTransformerForMaskedEEGModeling(nn.Module):
         x = self.patch_embed(x)
         batch_size, seq_len, _ = x.size()
 
+        # align mask length with sequence length
+        if bool_masked_pos is None or bool_masked_pos.numel() == 0 or bool_masked_pos.shape[1] != seq_len:
+            bool_masked_pos = torch.zeros((batch_size, seq_len), dtype=torch.bool, device=x.device)
+
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         mask_token = self.mask_token.expand(batch_size, seq_len, -1)
 
@@ -159,8 +163,6 @@ class NeuralTransformerForMaskedEEGModeling(nn.Module):
         return self.norm(x)
 
     def forward(self, x, input_chans=None, bool_masked_pos=None, return_all_tokens=False, return_patch_tokens=False, return_all_patch_tokens=False, classification=False, return_cls_token=False):
-        if bool_masked_pos is None:
-            bool_masked_pos = torch.zeros((x.shape[0], x.shape[1] * x.shape[2]), dtype=torch.bool).to(x.device)
         x = self.forward_features(x, input_chans=input_chans, bool_masked_pos=bool_masked_pos)
         if self.cls_head is not None and (classification or return_cls_token):
             cls_token = x[:, 0]

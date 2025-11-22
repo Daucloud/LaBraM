@@ -8,6 +8,7 @@ import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 from timm.models import create_model
+import modeling_pretrain  # register custom models
 
 from engine_for_ssvep_cls import train_one_epoch, evaluate
 from ssvep_dataset import build_Benchmark_dataset_leave_one_out
