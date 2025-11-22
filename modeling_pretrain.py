@@ -55,9 +55,10 @@ class NeuralTransformerForMaskedEEGModeling(nn.Module):
     def __init__(self, EEG_size=1600, patch_size=200, in_chans=1, out_chans=8, vocab_size=8192, embed_dim=200, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, qk_norm=None, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=None, init_values=None, attn_head_dim=None,
-                 use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False, init_std=0.02):
+                 use_abs_pos_emb=True, use_rel_pos_bias=False, use_shared_rel_pos_bias=False, init_std=0.02, num_classes=0):
         super().__init__()
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+        self.num_classes = num_classes
 
         self.patch_embed = TemporalConv(out_chans=out_chans)
         self.num_heads = num_heads
@@ -87,6 +88,7 @@ class NeuralTransformerForMaskedEEGModeling(nn.Module):
 
         self.init_std = init_std
         self.lm_head = nn.Linear(embed_dim, vocab_size)
+        self.cls_head = nn.Linear(embed_dim, num_classes) if num_classes and num_classes > 0 else None
 
         if self.pos_embed is not None:
             trunc_normal_(self.pos_embed, std=self.init_std)
@@ -94,6 +96,8 @@ class NeuralTransformerForMaskedEEGModeling(nn.Module):
         trunc_normal_(self.cls_token, std=self.init_std)
         trunc_normal_(self.mask_token, std=self.init_std)
         trunc_normal_(self.lm_head.weight, std=self.init_std)
+        if self.cls_head is not None:
+            trunc_normal_(self.cls_head.weight, std=self.init_std)
         self.apply(self._init_weights)
         self.fix_init_weight()
 
@@ -154,10 +158,16 @@ class NeuralTransformerForMaskedEEGModeling(nn.Module):
 
         return self.norm(x)
 
-    def forward(self, x, input_chans=None, bool_masked_pos=None, return_all_tokens=False, return_patch_tokens=False, return_all_patch_tokens=False):
+    def forward(self, x, input_chans=None, bool_masked_pos=None, return_all_tokens=False, return_patch_tokens=False, return_all_patch_tokens=False, classification=False, return_cls_token=False):
         if bool_masked_pos is None:
             bool_masked_pos = torch.zeros((x.shape[0], x.shape[1] * x.shape[2]), dtype=torch.bool).to(x.device)
         x = self.forward_features(x, input_chans=input_chans, bool_masked_pos=bool_masked_pos)
+        if self.cls_head is not None and (classification or return_cls_token):
+            cls_token = x[:, 0]
+            logits = self.cls_head(cls_token)
+            if return_cls_token:
+                return cls_token, logits
+            return logits
         if return_all_patch_tokens:
             return x
         x = x[:, 1:]
@@ -320,6 +330,29 @@ def labram_huge_patch200_1600_8k_vocab(pretrained=False, **kwargs): #380M
     model = NeuralTransformerForMEM(
         patch_size=200, embed_dim=800, depth=48, num_heads=16, mlp_ratio=4, qkv_bias=False, qk_norm=partial(nn.LayerNorm, eps=1e-6), out_chans=32,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), vocab_size=vocab_size, **kwargs)
+    model.default_cfg = _cfg()
+    if pretrained:
+        checkpoint = torch.load(
+            kwargs["init_ckpt"], map_location="cpu"
+        )
+        model.load_state_dict(checkpoint["model"])
+    return model
+
+
+@register_model
+def labram_base_patch200_1600_cls40(pretrained=False, **kwargs):
+    """
+    Classification variant that exposes the CLS token for 40-way SSVEP prediction.
+    """
+    num_classes = kwargs.pop("num_classes", 40)
+    model = NeuralTransformerForMaskedEEGModeling(
+        patch_size=200, embed_dim=200, depth=12, num_heads=10, mlp_ratio=4, qkv_bias=False,
+        qk_norm=partial(nn.LayerNorm, eps=1e-6),
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
+        vocab_size=kwargs.pop("vocab_size", 8192),
+        num_classes=num_classes,
+        **kwargs
+    )
     model.default_cfg = _cfg()
     if pretrained:
         checkpoint = torch.load(
