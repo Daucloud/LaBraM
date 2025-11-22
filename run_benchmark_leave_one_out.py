@@ -30,6 +30,7 @@ def get_args():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--test_sub', default=None, type=int, help='run a single held-out subject (1-35); if None, run all')
     parser.add_argument('--model', default='labram_base_patch200_1600_cls40', type=str)
+    parser.add_argument('--init_ckpt', default='', type=str, help='path to pretrain checkpoint')
     parser.add_argument('--gradient_accumulation_steps', default=1, type=int)
     parser.add_argument('--output_dir', default='', type=str)
     parser.add_argument('--warmup_epochs', default=0, type=int)
@@ -61,6 +62,17 @@ def main(args):
 
         model = create_model(args.model, num_classes=40)
         model.to(device)
+        if args.init_ckpt:
+            print(f'Loading pretrained weights from {args.init_ckpt} (skip cls_head)...')
+            checkpoint = torch.load(args.init_ckpt, map_location='cpu')
+            state_dict = checkpoint.get('model', checkpoint)
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith('cls_head'):
+                    continue
+                new_state_dict[k] = v
+            msg = model.load_state_dict(new_state_dict, strict=False)
+            print(f'Load result: {msg}')
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         loss_scaler = NativeScaler()
 
